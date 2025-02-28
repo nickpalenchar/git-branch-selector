@@ -1,36 +1,111 @@
-import { terminal } from 'terminal-kit';
+import { terminal } from "terminal-kit";
+import { execSync } from "child_process";
 
-// Properly handle Ctrl+C (SIGINT)
-function exitGracefully() {
+process.on("SIGINT", () => {
+    terminal("\n");
     process.exit(0);
+});
+
+let handleKey: (key: string) => void;
+let branchSelected = false;
+
+function getGitBranches(): string[] {
+    try {
+        const currentBranch = execSync("git branch --show-current", { encoding: "utf-8", stdio: "pipe" }).trim();
+        const reflogBranches = execSync(
+            "git reflog show --pretty=format:'%gs' | grep 'checkout:' | grep -oE '[^ ]+$' | awk '!seen[$0]++' | head -n 17",
+            { encoding: "utf-8", stdio: "pipe" }
+        ).trim().split("\n").filter((b) => b !== currentBranch);
+
+        if (reflogBranches.length > 0 && reflogBranches[0] !== "") return reflogBranches;
+
+        return execSync("git branch --format='%(refname:short)'", { encoding: "utf-8", stdio: "pipe" })
+            .trim().split("\n").filter((b) => b !== currentBranch);
+    } catch (error) {
+        return [];
+    }
 }
 
-// Capture SIGINT from process
-process.on('SIGINT', exitGracefully);
+function isWorkingDirectoryDirty(): boolean {
+    try {
+        const status = execSync("git status --porcelain=v1 | grep '^ M'", { encoding: "utf-8", stdio: "pipe" });
+        return status.trim().length > 0;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function confirmAndStash(): Promise<boolean> {
+    terminal.brightRed("\nYour working directory has uncommitted changes.\n");
+    terminal.brightYellow("Stash changes before switching? (Y/n): ");
+
+    return new Promise((resolve) => {
+        terminal.inputField({ default: "" }, (error, input) => {
+            if (error || input === undefined) {
+                terminal("\n");
+                process.exit(0);
+            }
+            if (input.toLowerCase() !== "n") {
+                try {
+                    terminal.brightBlue("\nStashing changes...\n");
+                    execSync("git stash", { stdio: "inherit" });
+                    resolve(true);
+                } catch (stashError) {
+                    terminal.red("\nFailed to stash changes. Aborting branch switch.\n");
+                    process.exit(1);
+                }
+            } else {
+                resolve(false);
+            }
+        });
+    });
+}
+
+async function checkoutBranch(branch: string) {
+    terminal.grabInput(false);
+    terminal.off("key", handleKey);
+
+    terminal.clear();
+    
+    if (isWorkingDirectoryDirty()) {
+        const shouldStash = await confirmAndStash();
+        if (!shouldStash) {
+            terminal.red("\nBranch switch canceled due to uncommitted changes.\n");
+            process.exit(0);
+        }
+    }
+    
+    terminal.brightGreen(`\nSwitching to branch: ${branch}...\n`);
+    try {
+        execSync(`git checkout ${branch}`, { stdio: "inherit" });
+        process.exit(0);
+    } catch (error) {
+        terminal.red(`\nFailed to checkout branch: ${branch}\n`);
+        process.exit(1);
+    }
+}
 
 async function runMenu() {
-    const originalOptions = process.argv.slice(2);
-
-    if (!originalOptions.length) {
-        terminal.red("\nNo options provided. Usage:\n");
-        terminal.green("   bun run menu.ts option1 option2 option3\n\n");
+    const branches = getGitBranches();
+    if (branches.length === 0) {
+        terminal.red("\nNo branches found.\n");
         process.exit(1);
     }
 
     terminal.clear();
-
-    const menuWidth = Math.max(Math.max(...originalOptions.map(opt => opt.length)) + 14, 60);
-
+    const menuWidth = Math.max(Math.max(...branches.map((opt) => opt.length)) + 14, 60);
     let filterText = "";
-    let filteredOptions = [...originalOptions];
+    let filteredOptions = [...branches];
     let selectedIndex = 0;
 
     function renderMenu() {
+        if (branchSelected) {
+            return;
+        }
         terminal.clear();
-
         terminal.moveTo(1, 1);
         terminal.brightCyan("╭" + "─".repeat(menuWidth) + "╮\n");
-        terminal.brightCyan("│ ").brightWhite.bold("Select an option:").column(menuWidth + 2)("│\n");
+        terminal.brightCyan("│ ").brightWhite.bold("Select a branch:").column(menuWidth + 2)("│\n");
         terminal.brightCyan("│ ").gray("Filter: ").brightWhite(filterText.padEnd(menuWidth - 9)).column(menuWidth + 2)("│\n");
         terminal.brightCyan("├" + "─".repeat(menuWidth) + "┤\n");
 
@@ -53,16 +128,23 @@ async function runMenu() {
     function updateFilter(char: string) {
         if (char === "BACKSPACE") {
             filterText = filterText.slice(0, -1);
-        } else if (char.length === 1 && char.match(/[a-zA-Z0-9 ]/)) {
+        } else if (char.length === 1 && char.match(/[a-zA-Z0-9-_]/)) {
             filterText += char;
         }
 
-        filteredOptions = originalOptions.filter(opt => opt.toLowerCase().includes(filterText.toLowerCase()));
+        filteredOptions = branches.filter((opt) =>
+            opt.toLowerCase().includes(filterText.toLowerCase())
+        );
         selectedIndex = 0;
         renderMenu();
     }
 
-    function handleKey(key: string) {
+    handleKey = function (key: string) {
+        if (key === "CTRL_C") {
+            terminal("\n");
+            process.exit(0);
+        }
+
         if (key === "UP" && filteredOptions.length > 0) {
             selectedIndex = (selectedIndex - 1 + filteredOptions.length) % filteredOptions.length;
         } else if (key === "DOWN" && filteredOptions.length > 0) {
@@ -71,19 +153,15 @@ async function runMenu() {
             if (filteredOptions[selectedIndex] === undefined) {
                 return;
             }
-            terminal("\nYou selected: ").green.bold(filteredOptions[selectedIndex] + "\n\n");
-            process.exit(0);
-        } else if (key === "CTRL_C") {
-            exitGracefully();
+            branchSelected = true;
+            checkoutBranch(filteredOptions[selectedIndex]);
         } else {
             updateFilter(key);
         }
         renderMenu();
-    }
+    };
 
     renderMenu();
-
-    // Enable live key handling and ensure Ctrl+C works
     terminal.grabInput({ mouse: "button" });
     terminal.on("key", handleKey);
 }
