@@ -1,32 +1,36 @@
-import { terminal } from "terminal-kit";
-import { execSync } from "child_process";
+const { terminal } = require("terminal-kit");
+const { execSync } = require("child_process");
 
 process.on("SIGINT", () => {
     terminal("\n");
     process.exit(0);
 });
 
-let handleKey: (key: string) => void;
-let branchSelected = false;
+let handleKey;
 
-function getGitBranches(): string[] {
+function getGitBranches() {
     try {
         const currentBranch = execSync("git branch --show-current", { encoding: "utf-8", stdio: "pipe" }).trim();
         const reflogBranches = execSync(
             "git reflog show --pretty=format:'%gs' | grep 'checkout:' | grep -oE '[^ ]+$' | awk '!seen[$0]++' | head -n 17",
             { encoding: "utf-8", stdio: "pipe" }
-        ).trim().split("\n").filter((b) => b !== currentBranch);
+        )
+            .trim()
+            .split("\n")
+            .filter((b) => b !== currentBranch);
 
         if (reflogBranches.length > 0 && reflogBranches[0] !== "") return reflogBranches;
 
         return execSync("git branch --format='%(refname:short)'", { encoding: "utf-8", stdio: "pipe" })
-            .trim().split("\n").filter((b) => b !== currentBranch);
+            .trim()
+            .split("\n")
+            .filter((b) => b !== currentBranch);
     } catch (error) {
         return [];
     }
 }
 
-function isWorkingDirectoryDirty(): boolean {
+function isWorkingDirectoryDirty() {
     try {
         const status = execSync("git status --porcelain=v1 | grep '^ M'", { encoding: "utf-8", stdio: "pipe" });
         return status.trim().length > 0;
@@ -35,12 +39,12 @@ function isWorkingDirectoryDirty(): boolean {
     }
 }
 
-async function confirmAndStash(): Promise<boolean> {
-    terminal.brightRed("\nYour working directory has uncommitted changes.\n");
-    terminal.brightYellow("Stash changes before switching? (Y/n): ");
-
+function confirmAndStash() {
     return new Promise((resolve) => {
-        terminal.inputField({ default: "" }, (error, input) => {
+        terminal.brightRed("\nYour working directory has uncommitted changes.\n");
+        terminal.brightYellow("Stash changes before switching? (Y/n): ");
+
+        terminal.inputField({ default: "Y" }, (error, input) => {
             if (error || input === undefined) {
                 terminal("\n");
                 process.exit(0);
@@ -61,31 +65,34 @@ async function confirmAndStash(): Promise<boolean> {
     });
 }
 
-async function checkoutBranch(branch: string) {
+async function checkoutBranch(branch) {
     terminal.grabInput(false);
     terminal.off("key", handleKey);
 
     terminal.clear();
-    
+    terminal.brightGreen(`\nSwitching to branch: ${branch}...\n`);
+
     if (isWorkingDirectoryDirty()) {
         const shouldStash = await confirmAndStash();
         if (!shouldStash) {
             terminal.red("\nBranch switch canceled due to uncommitted changes.\n");
-            process.exit(0);
+            terminal.reset();
+            process.exit(1);
         }
     }
-    
-    terminal.brightGreen(`\nSwitching to branch: ${branch}...\n`);
+
     try {
         execSync(`git checkout ${branch}`, { stdio: "inherit" });
+        terminal.reset();
         process.exit(0);
     } catch (error) {
         terminal.red(`\nFailed to checkout branch: ${branch}\n`);
+        terminal.reset();
         process.exit(1);
     }
 }
 
-async function runMenu() {
+function runMenu() {
     const branches = getGitBranches();
     if (branches.length === 0) {
         terminal.red("\nNo branches found.\n");
@@ -99,9 +106,6 @@ async function runMenu() {
     let selectedIndex = 0;
 
     function renderMenu() {
-        if (branchSelected) {
-            return;
-        }
         terminal.clear();
         terminal.moveTo(1, 1);
         terminal.brightCyan("╭" + "─".repeat(menuWidth) + "╮\n");
@@ -125,7 +129,7 @@ async function runMenu() {
         terminal.brightCyan("╰" + "─".repeat(menuWidth) + "╯\n");
     }
 
-    function updateFilter(char: string) {
+    function updateFilter(char) {
         if (char === "BACKSPACE") {
             filterText = filterText.slice(0, -1);
         } else if (char.length === 1 && char.match(/[a-zA-Z0-9-_]/)) {
@@ -139,7 +143,7 @@ async function runMenu() {
         renderMenu();
     }
 
-    handleKey = function (key: string) {
+    handleKey = function (key) {
         if (key === "CTRL_C") {
             terminal("\n");
             process.exit(0);
@@ -153,7 +157,6 @@ async function runMenu() {
             if (filteredOptions[selectedIndex] === undefined) {
                 return;
             }
-            branchSelected = true;
             checkoutBranch(filteredOptions[selectedIndex]);
         } else {
             updateFilter(key);
