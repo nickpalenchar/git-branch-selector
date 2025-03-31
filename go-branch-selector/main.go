@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +18,32 @@ func (i branchItem) Title() string       { return string(i) }
 func (i branchItem) Description() string { return "" }
 func (i branchItem) FilterValue() string { return string(i) }
 
+type compactDelegate struct {
+	list.DefaultDelegate
+}
+
+func (d compactDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(branchItem)
+	if !ok {
+		return
+	}
+
+	str := fmt.Sprintf("%s %s", "•", i.Title())
+	fn := itemStyle.Render
+	if index == m.Index() {
+		fn = func(s ...string) string {
+			return selectedItemStyle.Render(">", s[0])
+		}
+	}
+
+	fmt.Fprint(w, fn(str))
+}
+
+var (
+	itemStyle         = lipgloss.NewStyle().Padding(0, 0, 0, 0)
+	selectedItemStyle = lipgloss.NewStyle().Padding(0, 0, 0, 0).Foreground(lipgloss.Color("205"))
+)
+
 type model struct {
 	list list.Model
 }
@@ -27,12 +54,13 @@ func initialModel() model {
 	for i, item := range items {
 		listItems[i] = branchItem(item)
 	}
-	l := list.New(listItems, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(listItems, compactDelegate{}, 0, 0)
 	l.Title = "Select a branch"
 	l.SetFilteringEnabled(true)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = lipgloss.NewStyle().MarginLeft(2)
+	l.SetShowHelp(false)
 
 	return model{
 		list: l,
