@@ -18,6 +18,8 @@ type model struct {
 	filter           textinput.Model
 	width            int
 	height           int
+	visibleStart     int
+	visibleEnd       int
 }
 
 func initialModel() model {
@@ -65,21 +67,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp:
 			if m.cursor > 0 {
 				m.cursor--
+				if m.cursor < m.visibleStart {
+					m.visibleStart = m.cursor
+					m.visibleEnd = m.visibleStart + m.height - 4
+				}
 			}
 		case tea.KeyDown:
 			if m.cursor < len(m.filteredBranches)-1 {
 				m.cursor++
+				if m.cursor >= m.visibleEnd {
+					m.visibleEnd = m.cursor + 1
+					m.visibleStart = m.visibleEnd - (m.height - 4)
+				}
 			}
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.visibleEnd = m.height - 4
+		if m.visibleEnd > len(m.filteredBranches) {
+			m.visibleEnd = len(m.filteredBranches)
+		}
+		m.visibleStart = 0
 	}
 
 	m.filter, cmd = m.filter.Update(msg)
 	m.filteredBranches = filterBranches(m.branches, m.filter.Value())
 	if m.cursor >= len(m.filteredBranches) {
 		m.cursor = 0
+	}
+	if m.visibleEnd > len(m.filteredBranches) {
+		m.visibleEnd = len(m.filteredBranches)
+	}
+	if m.visibleStart > m.visibleEnd-(m.height-4) {
+		m.visibleStart = m.visibleEnd - (m.height - 4)
 	}
 
 	return m, cmd
@@ -101,7 +122,8 @@ func (m model) View() string {
 		return s.String()
 	}
 
-	for i, branch := range m.filteredBranches {
+	for i := m.visibleStart; i < m.visibleEnd; i++ {
+		branch := m.filteredBranches[i]
 		cursor := " "
 		if m.cursor == i {
 			cursor = ">"
