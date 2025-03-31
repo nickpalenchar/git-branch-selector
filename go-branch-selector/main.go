@@ -28,11 +28,11 @@ func (d compactDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		return
 	}
 
-	str := fmt.Sprintf("%s %s", "•", i.Title())
+	str := fmt.Sprintf("  %s", i.Title())
 	fn := itemStyle.Render
 	if index == m.Index() {
 		fn = func(s ...string) string {
-			return selectedItemStyle.Render(">", s[0])
+			return selectedItemStyle.Render(">", strings.TrimLeft(s[0], " "))
 		}
 	}
 
@@ -59,7 +59,7 @@ func initialModel() model {
 	l.SetFilteringEnabled(true)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
-	l.Styles.Title = lipgloss.NewStyle().MarginLeft(2)
+	l.Styles.Title = lipgloss.NewStyle().MarginLeft(0)
 	l.SetShowHelp(false)
 
 	return model{
@@ -113,7 +113,7 @@ func (m model) View() string {
 		os.Exit(1)
 	}
 
-	return lipgloss.NewStyle().Margin(1, 2).Render(m.list.View())
+	return lipgloss.NewStyle().Margin(1, 1).Render(m.list.View())
 }
 
 func main() {
