@@ -6,37 +6,41 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
+type branchItem string
+
+func (i branchItem) Title() string       { return string(i) }
+func (i branchItem) Description() string { return "" }
+func (i branchItem) FilterValue() string { return string(i) }
+
 type model struct {
-	allBranches  []string
-	listView     []string
-	cursor       int
-	filter       textinput.Model
-	width        int
-	height       int
-	visibleStart int
-	visibleEnd   int
+	list list.Model
 }
 
 func initialModel() model {
-	ti := textinput.New()
-	ti.Placeholder = "Filter branches..."
-	ti.Focus()
+	items := getGitBranches()
+	listItems := make([]list.Item, len(items))
+	for i, item := range items {
+		listItems[i] = branchItem(item)
+	}
+	l := list.New(listItems, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Select a branch"
+	l.SetFilteringEnabled(true)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.Styles.Title = lipgloss.NewStyle().MarginLeft(2)
 
-	allBranches := getGitBranches()
 	return model{
-		allBranches: allBranches,
-		listView:    allBranches,
-		filter:      ti,
+		list: l,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -48,8 +52,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if len(m.listView) > 0 {
-				selectedBranch := m.listView[m.cursor]
+			if len(m.list.Items()) > 0 {
+				selectedBranch := m.list.SelectedItem().(list.DefaultItem).Title()
 				if isWorkingDirectoryDirty() {
 					fmt.Print("\nYour working directory has uncommitted changes.\n")
 					fmt.Print("Stash changes before switching? (Y/n): ")
@@ -64,94 +68,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				exec.Command("git", "checkout", selectedBranch).Run()
 			}
 			return m, tea.Quit
-		case tea.KeyUp:
-			if m.cursor > 0 {
-				m.cursor--
-				if m.cursor < m.visibleStart {
-					m.visibleStart = m.cursor
-					m.visibleEnd = m.visibleStart + m.height - 4
-				}
-			}
-		case tea.KeyDown:
-			if m.cursor < len(m.listView)-1 {
-				m.cursor++
-				if m.cursor >= m.visibleEnd {
-					m.visibleEnd = m.cursor + 1
-					m.visibleStart = m.visibleEnd - (m.height - 4)
-				}
-			}
 		}
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.visibleEnd = m.height - 4
-		if m.visibleEnd > len(m.listView) {
-			m.visibleEnd = len(m.listView)
-		}
-		m.visibleStart = 0
+		h, v := lipgloss.NewStyle().Margin(1, 2).GetFrameSize()
+		m.list.SetWidth(msg.Width - h)
+		m.list.SetHeight(msg.Height - v)
 	}
 
-	m.filter, cmd = m.filter.Update(msg)
-	filterText := m.filter.Value()
-
-	if filterText == "" {
-		m.listView = m.allBranches
-	} else {
-		filterText = strings.ToLower(filterText)
-		m.listView = make([]string, 0)
-		for _, branch := range m.allBranches {
-			if strings.Contains(strings.ToLower(branch), filterText) {
-				m.listView = append(m.listView, branch)
-			}
-		}
-	}
-
-	if m.cursor >= len(m.listView) {
-		m.cursor = 0
-	}
-	if m.visibleEnd > len(m.listView) {
-		m.visibleEnd = len(m.listView)
-	}
-	if m.visibleStart > m.visibleEnd-(m.height-4) {
-		m.visibleStart = m.visibleEnd - (m.height - 4)
-	}
-	if m.visibleStart < 0 {
-		m.visibleStart = 0
-	}
-
+	m.list, cmd = m.list.Update(msg)
 	return m, cmd
 }
 
 func (m model) View() string {
-	if len(m.allBranches) == 0 {
+	if len(m.list.Items()) == 0 {
 		fmt.Println("No branches found.")
 		os.Exit(1)
 	}
 
-	var s strings.Builder
-	s.WriteString("Select a branch:\n\n")
-	s.WriteString(m.filter.View())
-	s.WriteString("\n\n")
-
-	if len(m.listView) == 0 {
-		s.WriteString("No matches found.\n")
-		return s.String()
-	}
-
-	for i := m.visibleStart; i < m.visibleEnd; i++ {
-		branch := m.listView[i]
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
-		}
-		style := lipgloss.NewStyle()
-		if m.cursor == i {
-			style = style.Foreground(lipgloss.Color("205"))
-		}
-		s.WriteString(fmt.Sprintf("%s %s\n", cursor, style.Render(branch)))
-	}
-
-	return s.String()
+	return lipgloss.NewStyle().Margin(1, 2).Render(m.list.View())
 }
 
 func main() {
