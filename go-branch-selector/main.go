@@ -12,14 +12,14 @@ import (
 )
 
 type model struct {
-	branches         []string
-	filteredBranches []string
-	cursor           int
-	filter           textinput.Model
-	width            int
-	height           int
-	visibleStart     int
-	visibleEnd       int
+	allBranches  []string
+	listView     []string
+	cursor       int
+	filter       textinput.Model
+	width        int
+	height       int
+	visibleStart int
+	visibleEnd   int
 }
 
 func initialModel() model {
@@ -27,11 +27,11 @@ func initialModel() model {
 	ti.Placeholder = "Filter branches..."
 	ti.Focus()
 
-	branches := getGitBranches()
+	allBranches := getGitBranches()
 	return model{
-		branches:         branches,
-		filteredBranches: branches,
-		filter:           ti,
+		allBranches: allBranches,
+		listView:    allBranches,
+		filter:      ti,
 	}
 }
 
@@ -48,8 +48,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if len(m.filteredBranches) > 0 {
-				selectedBranch := m.filteredBranches[m.cursor]
+			if len(m.listView) > 0 {
+				selectedBranch := m.listView[m.cursor]
 				if isWorkingDirectoryDirty() {
 					fmt.Print("\nYour working directory has uncommitted changes.\n")
 					fmt.Print("Stash changes before switching? (Y/n): ")
@@ -73,7 +73,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case tea.KeyDown:
-			if m.cursor < len(m.filteredBranches)-1 {
+			if m.cursor < len(m.listView)-1 {
 				m.cursor++
 				if m.cursor >= m.visibleEnd {
 					m.visibleEnd = m.cursor + 1
@@ -85,20 +85,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.visibleEnd = m.height - 4
-		if m.visibleEnd > len(m.filteredBranches) {
-			m.visibleEnd = len(m.filteredBranches)
+		if m.visibleEnd > len(m.listView) {
+			m.visibleEnd = len(m.listView)
 		}
 		m.visibleStart = 0
 	}
 
 	m.filter, cmd = m.filter.Update(msg)
-	m.filteredBranches = filterBranches(m.branches, m.filter.Value())
+	filterText := m.filter.Value()
 
-	if m.cursor >= len(m.filteredBranches) {
+	if filterText == "" {
+		m.listView = m.allBranches
+	} else {
+		filterText = strings.ToLower(filterText)
+		m.listView = make([]string, 0)
+		for _, branch := range m.allBranches {
+			if strings.Contains(strings.ToLower(branch), filterText) {
+				m.listView = append(m.listView, branch)
+			}
+		}
+	}
+
+	if m.cursor >= len(m.listView) {
 		m.cursor = 0
 	}
-	if m.visibleEnd > len(m.filteredBranches) {
-		m.visibleEnd = len(m.filteredBranches)
+	if m.visibleEnd > len(m.listView) {
+		m.visibleEnd = len(m.listView)
 	}
 	if m.visibleStart > m.visibleEnd-(m.height-4) {
 		m.visibleStart = m.visibleEnd - (m.height - 4)
@@ -111,7 +123,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	if len(m.branches) == 0 {
+	if len(m.allBranches) == 0 {
 		fmt.Println("No branches found.")
 		os.Exit(1)
 	}
@@ -121,13 +133,13 @@ func (m model) View() string {
 	s.WriteString(m.filter.View())
 	s.WriteString("\n\n")
 
-	if len(m.filteredBranches) == 0 {
+	if len(m.listView) == 0 {
 		s.WriteString("No matches found.\n")
 		return s.String()
 	}
 
 	for i := m.visibleStart; i < m.visibleEnd; i++ {
-		branch := m.filteredBranches[i]
+		branch := m.listView[i]
 		cursor := " "
 		if m.cursor == i {
 			cursor = ">"
@@ -192,18 +204,4 @@ func getGitBranches() []string {
 func isWorkingDirectoryDirty() bool {
 	status, _ := exec.Command("git", "status", "--porcelain=v1").Output()
 	return strings.Contains(string(status), " M")
-}
-
-func filterBranches(branches []string, filter string) []string {
-	if filter == "" {
-		return branches
-	}
-	filter = strings.ToLower(filter)
-	var filtered []string
-	for _, branch := range branches {
-		if strings.Contains(strings.ToLower(branch), filter) {
-			filtered = append(filtered, branch)
-		}
-	}
-	return filtered
 }
