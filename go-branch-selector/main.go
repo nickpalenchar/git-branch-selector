@@ -93,6 +93,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.filter, cmd = m.filter.Update(msg)
 	m.filteredBranches = filterBranches(m.branches, m.filter.Value())
+
 	if m.cursor >= len(m.filteredBranches) {
 		m.cursor = 0
 	}
@@ -101,6 +102,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.visibleStart > m.visibleEnd-(m.height-4) {
 		m.visibleStart = m.visibleEnd - (m.height - 4)
+	}
+	if m.visibleStart < 0 {
+		m.visibleStart = 0
 	}
 
 	return m, cmd
