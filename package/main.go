@@ -144,8 +144,8 @@ func getGitBranches() []string {
 			}
 		}
 	}
-	if len(branches) > 17 {
-		branches = branches[:17]
+	if len(branches) > 100 {
+		branches = branches[:100]
 	}
 
 	if len(branches) > 0 {
